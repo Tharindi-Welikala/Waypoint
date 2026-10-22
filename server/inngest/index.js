@@ -151,85 +151,140 @@ const syncWorkspaceMemberCreation = inngest.createFunction(
 );
 
 // Inngest fuction to Send email on task creation
+
 const sendTaskAssignmentEmail = inngest.createFunction(
-  {id: "send-task-assignment-mail" },
-  {event: "app/task.assigned"},
-  async ({event, step}) => {
-    const {taskId, origin} = event.data;
+  {
+    id: "send-task-assignment-mail",
+    triggers: [{ event: "app/task.assigned" }],
+  },
+  async ({ event, step }) => {
+    const { taskId, origin } = event.data;
 
+    // Fetch task details
     const task = await prisma.task.findUnique({
-      where: {id: taskId},
-      include: {assignee: true, project: true}
-    })
+      where: { id: taskId },
+      include: {
+        assignee: true,
+        project: true,
+      },
+    });
 
-    await sendEmail({
-      to: task.assignee.email,
-      subject: `New Task Assignment in ${task.project.name}`,
-      body: `<div style="max-width: 600px;">
-              <h2>Hi ${task.assignee.name},</h2>
+    // Stop if the task no longer exists
+    if (!task) return;
 
-              <p style="font-size: 16px;">You've been assigned a new task:</p>
-              <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;"> ${task.title}</p>
+    // Send task assignment email
+    await step.run("send-task-assignment-email", async () => {
+      await sendEmail({
+        to: task.assignee.email,
+        subject: `New Task Assignment in ${task.project.name}`,
+        body: `
+          <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+            <h2>Hi ${task.assignee.name},</h2>
 
-              <div style="border: 1px solid #ddd; padding: 12px 16px; border-radius: 6px; margin-bottom: 30px;">
-                <p style="margin: 6px 0;"><strong>Description:</strong> ${task.description}</p>
-                <p style="margin: 6px 0;"><strong>Due Date:</strong> ${new Date(task.due_date).toLocaleDateString()}</p>
-              </div>
+            <p style="font-size: 16px;">
+              You've been assigned a new task:
+            </p>
 
-              <a href="${origin}" style="display: inline-block; background-color: #007bff; padding: 12px 24px; 
-                border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none;">
-                View Task
-              </a>
+            <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">
+              ${task.title}
+            </p>
 
-              <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
-                Please make sure to review and complete it before the due date.
+            <div style="border: 1px solid #ddd; padding: 12px 16px; border-radius: 6px; margin-bottom: 30px;">
+              <p style="margin: 6px 0;">
+                <strong>Description:</strong> ${task.description ?? "No description provided"}
               </p>
-            </div>`
 
-    })
+              <p style="margin: 6px 0;">
+                <strong>Due Date:</strong>
+                ${task.due_date ? new Date(task.due_date).toLocaleDateString() : "Not specified"}
+              </p>
+            </div>
 
-    if(new Date(task.due_date).toLocalDateString() !== new Date().toDateString()){
-      await step.sleepUntil('wait-for-the-due-date', new Date(task.due_date));
-      await step.run('check-if-task-is-completed', async () => {
-        const task = await prisma.task.findUnique({
-          where: {id: taskId},
-          include: {assignee: true, project: true}
-        })
+            <a href="${origin}"
+               style="display: inline-block; background-color: #007bff; padding: 12px 24px; border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none;">
+              View Task
+            </a>
 
-        if(!task) return;
-        if(task.status !== "DONE"){
-          await step.run('send-task-reminder-email', async () => {
-            await sendEmail({
-              to: task.assignee.email,
-              subject: `Reminder for ${task.project.name}`,
-              body: `<div style="max-width: 600px;">
-                     <h2>Hi ${task.assignee.name},</h2>
+            <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
+              Please review and complete the task before the due date.
+            </p>
+          </div>
+        `,
+      });
+    });
 
-                     <p style="font-size: 16px;">You have a task due in ${task.project.name}:</p>
-                     <p style="font-size: 18px; font-weight: bold; color: #007bff;  margin: 8px 0;"> ${task.title}</p>
+    // Schedule a reminder if the due date is not today
+    if (
+      task.due_date &&
+      new Date(task.due_date).toDateString() !==
+        new Date().toDateString()
+    ) {
+      await step.sleepUntil(
+        "wait-for-the-due-date",
+        new Date(task.due_date)
+      );
 
-                     <div style="border: 1px solid #ddd; padding: 12px 16px; border-radius: 6px;
-                     margin-bottom: 30px;">
-                       <p style="margin: 6px 0;"><strong>Description:</strong> ${task.description}</p>
-                       <p style="margin: 6px 0;"><strong>Due Date:</strong> ${new Date(task.due_date).toLocaleDateString()}</p>
-                     </div>
-
-                     <a href="${origin}" style="display: inline-block; background-color: #007bff; padding: 12px 24px; 
-                        border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none;">
-                        View Task
-                     </a>
-
-                     <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
-                        Please make sure to review and complete it before the due date.
-                     </p>
-                    </div>`
-            })
-          })
+      // Fetch the latest task status at the due date
+      const latestTask = await step.run(
+        "check-if-task-is-completed",
+        async () => {
+          return await prisma.task.findUnique({
+            where: { id: taskId },
+            include: {
+              assignee: true,
+              project: true,
+            },
+          });
         }
-      })
+      );
+
+      // Send a reminder only if the task still exists and is incomplete
+      if (latestTask && latestTask.status !== "DONE") {
+        await step.run("send-task-reminder-email", async () => {
+          await sendEmail({
+            to: latestTask.assignee.email,
+            subject: `Reminder for ${latestTask.project.name}`,
+            body: `
+              <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+                <h2>Hi ${latestTask.assignee.name},</h2>
+
+                <p style="font-size: 16px;">
+                  You have a task due in ${latestTask.project.name}:
+                </p>
+
+                <p style="font-size: 18px; font-weight: bold; color: #007bff; margin: 8px 0;">
+                  ${latestTask.title}
+                </p>
+
+                <div style="border: 1px solid #ddd; padding: 12px 16px; border-radius: 6px; margin-bottom: 30px;">
+                  <p style="margin: 6px 0;">
+                    <strong>Description:</strong>
+                    ${latestTask.description ?? "No description provided"}
+                  </p>
+
+                  <p style="margin: 6px 0;">
+                    <strong>Due Date:</strong>
+                    ${new Date(latestTask.due_date).toLocaleDateString()}
+                  </p>
+                </div>
+
+                <a href="${origin}"
+                   style="display: inline-block; background-color: #007bff; padding: 12px 24px; border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none;">
+                  View Task
+                </a>
+
+                <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
+                  Please review and complete the task as soon as possible.
+                </p>
+              </div>
+            `,
+          });
+        });
+      }
     }
   }
-)
+);
+
 
 
 // Export functions for the Inngest endpoint

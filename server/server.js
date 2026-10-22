@@ -34,3 +34,12 @@ app.use('/api/comments', protect, commentRouter);
 
 // Export the Express app for Vercel's serverless runtime.
 export default app;
+
+// Start the server locally; Vercel imports the app instead.
+if (process.env.NODE_ENV !== "production") {
+  const PORT = process.env.PORT || 5000;
+
+  app.listen(PORT, () => {
+    console.log(`Waypoint Server running at http://localhost:${PORT}`);
+  });
+}
