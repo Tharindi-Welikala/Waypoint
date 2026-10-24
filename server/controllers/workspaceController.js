@@ -1,9 +1,11 @@
 import prisma from "../configs/prisma.js";
+import { mapWorkspaceRole, syncWorkspacesForUser } from "../services/clerkSync.js";
 
 // Get all workspaces for user
 export const getUserWorkspaces = async (req, res) => {
     try {
         const {userId} = await req.auth();
+        await syncWorkspacesForUser(userId);
         const workspaces = await prisma.workspace.findMany({
             where: {
                 members: {some: {userId: userId}}
@@ -31,20 +33,20 @@ export const addMemberToWorkspace = async (req, res) => {
     try {
         const {userId} = await req.auth();
         const {email, role, workspaceId, message} = req.body;
-
-        // Check if user exists
-        const user = await prisma.user.findUnique({where: {id: userId}});
-
-        if (!user) {
-            return res.status(404).json({message: "User not found"});
-        }
+        const mappedRole = mapWorkspaceRole(role);
 
         if (!workspaceId || !role) {
             return res.status(400).json({message: "Workspace ID and role are required"});
         }
 
-        if (!["ADMIN", "MEMBER"].includes(role)) {
-            return res.status(400).json({message: "Invalid role"});
+        if (!email) {
+            return res.status(400).json({message: "Email is required"});
+        }
+
+        const actor = await prisma.user.findUnique({where: {id: userId}});
+
+        if (!actor) {
+            return res.status(404).json({message: "User not found"});
         }
 
         // fetch workspace
@@ -62,8 +64,14 @@ export const addMemberToWorkspace = async (req, res) => {
             return res.status(401).json({message: "You do not have permission to add members to this workspace"});
         }
 
+        const invitee = await prisma.user.findUnique({where: {email}});
+
+        if (!invitee) {
+            return res.status(404).json({message: "No user with that email has signed up yet"});
+        }
+
         // Check if user is already a member
-        const existingMember = workspace.members.find((member) => member.userId === userId);
+        const existingMember = workspace.members.find((member) => member.userId === invitee.id);
 
         if (existingMember) {
             return res.status(400).json({message: "User is already a member of this workspace"});
@@ -71,9 +79,9 @@ export const addMemberToWorkspace = async (req, res) => {
 
         const member = await prisma.workspaceMember.create({
             data: {
-                userId: user.id,
+                userId: invitee.id,
                 workspaceId,
-                role,
+                role: mappedRole,
                 message
             }
         });

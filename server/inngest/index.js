@@ -2,6 +2,7 @@
 import { Inngest } from "inngest";
 import prisma from "../configs/prisma.js";
 import sendEmail from "../configs/nodemailer.js";
+import { syncOrganization, upsertClerkUser } from "../services/clerkSync.js";
 
 // Create Inngest client
 export const inngest = new Inngest({ id: "waypoint" });
@@ -15,12 +16,18 @@ const syncUserCreation = inngest.createFunction(
   async ({ event }) => {
     const { data } = event;
 
-    await prisma.user.create({
-      data: {
+    await prisma.user.upsert({
+      where: { id: data.id },
+      create: {
         id: data.id,
         email: data?.email_addresses?.[0]?.email_address,
         name: `${data?.first_name ?? ""} ${data?.last_name ?? ""}`.trim(),
-        image: data?.image_url,
+        image: data?.image_url ?? "",
+      },
+      update: {
+        email: data?.email_addresses?.[0]?.email_address,
+        name: `${data?.first_name ?? ""} ${data?.last_name ?? ""}`.trim(),
+        image: data?.image_url ?? "",
       },
     });
   }
@@ -35,7 +42,7 @@ const syncUserDeletion = inngest.createFunction(
   async ({ event }) => {
     const { data } = event;
 
-    await prisma.user.delete({
+    await prisma.user.deleteMany({
       where: {
         id: data.id,
       },
@@ -52,14 +59,20 @@ const syncUserUpdation = inngest.createFunction(
   async ({ event }) => {
     const { data } = event;
 
-    await prisma.user.update({
+    await prisma.user.upsert({
       where: {
         id: data.id,
       },
-      data: {
+      create: {
+        id: data.id,
         email: data?.email_addresses?.[0]?.email_address,
         name: `${data?.first_name ?? ""} ${data?.last_name ?? ""}`.trim(),
-        image: data?.image_url,
+        image: data?.image_url ?? "",
+      },
+      update: {
+        email: data?.email_addresses?.[0]?.email_address,
+        name: `${data?.first_name ?? ""} ${data?.last_name ?? ""}`.trim(),
+        image: data?.image_url ?? "",
       },
     });
   }
@@ -75,24 +88,11 @@ const syncWorkspaceCreation = inngest.createFunction(
   async ({ event }) => {
     const { data } = event;
 
-    await prisma.workspace.create({
-      data: {
-        id: data.id,
-        name: data.name,
-        slug: data.slug,
-        ownerId: data.created_by,
-        image_url: data.image_url,
-      },
-    });
-
-    // Add creator as admin
-    await prisma.workspaceMember.create({
-      data: {
-        userId: data.created_by,
-        workspaceId: data.id,
-        role: "admin",
-      },
-    });
+    const ownerId = data.created_by || data.createdBy;
+    if (ownerId) {
+      await upsertClerkUser(ownerId);
+    }
+    await syncOrganization(data.id);
   }
 );
 
@@ -140,13 +140,24 @@ const syncWorkspaceMemberCreation = inngest.createFunction(
   async ({ event }) => {
     const { data } = event;
 
-    await prisma.workspaceMember.create({
-      data: {
-        userId: data.user_id,
-        workspaceId: data.organization_id,
-        role: String(data.role_name).toUpperCase(),
-      },
-    });
+    const orgId = data.organization_id || data.organization?.id;
+    if (orgId) {
+      await syncOrganization(orgId);
+    }
+  }
+);
+
+const syncWorkspaceMembershipCreated = inngest.createFunction(
+  {
+    id: "sync-workspace-membership-from-clerk",
+    triggers: [{ event: "clerk/organizationMembership.created" }],
+  },
+  async ({ event }) => {
+    const { data } = event;
+    const orgId = data.organization?.id || data.organization_id;
+    if (orgId) {
+      await syncOrganization(orgId);
+    }
   }
 );
 
@@ -296,5 +307,6 @@ export const functions = [
     syncWorkspaceUpdation,
     syncWorkspaceDeletion,
     syncWorkspaceMemberCreation,
+    syncWorkspaceMembershipCreated,
     sendTaskAssignmentEmail
 ];
