@@ -1,3 +1,12 @@
-node_modules
+node_modules/
 .env
+.env.*
+!.env.example
+!.env.*.example
 .vscode/
+.vercel/
+client/dist/
+*.log
+npm-debug.log*
+.DS_Store
+Thumbs.db
