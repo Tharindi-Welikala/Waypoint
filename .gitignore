@@ -10,3 +10,5 @@ client/dist/
 npm-debug.log*
 .DS_Store
 Thumbs.db
+/client/CODE_OF_CONDUCT.md
+/client/CONTRIBUTING.md
