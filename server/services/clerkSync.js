@@ -5,6 +5,11 @@ async function getClerk() {
   return typeof clerkClient === "function" ? await clerkClient() : clerkClient;
 }
 
+export async function deleteClerkOrganization(orgId) {
+  const clerk = await getClerk();
+  return clerk.organizations.deleteOrganization(orgId);
+}
+
 function listData(result) {
   if (Array.isArray(result)) return result;
   return result?.data ?? [];

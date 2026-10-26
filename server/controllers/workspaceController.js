@@ -1,5 +1,7 @@
 import prisma from "../configs/prisma.js";
-import { mapWorkspaceRole, syncWorkspacesForUser } from "../services/clerkSync.js";
+import { deleteClerkOrganization, mapWorkspaceRole, syncWorkspacesForUser } from "../services/clerkSync.js";
+import { handleError } from "../utils/errorHandler.js";
+import { inngest } from "../inngest/index.js";
 
 // Get all workspaces for user
 export const getUserWorkspaces = async (req, res) => {
@@ -23,10 +25,50 @@ export const getUserWorkspaces = async (req, res) => {
         });
         res.json({workspaces});
     } catch (error) {
-        console.log(error);
-        res.status(500).json({message: error.code || error.message });
+        handleError(error, res, "Failed to fetch workspaces");
     }
 }
+
+// Delete a workspace from Clerk and the application database.
+export const deleteWorkspace = async (req, res) => {
+    try {
+        const { userId } = await req.auth();
+        const { workspaceId } = req.params;
+        let workspace = await prisma.workspace.findUnique({
+            where: { id: workspaceId },
+            select: { id: true, ownerId: true },
+        });
+
+        if (!workspace) {
+            // The database may have been edited directly while Clerk still owns
+            // the organization. Re-sync only this user's Clerk memberships first.
+            await syncWorkspacesForUser(userId);
+            workspace = await prisma.workspace.findUnique({
+                where: { id: workspaceId },
+                select: { id: true, ownerId: true },
+            });
+            if (!workspace) {
+                return res.status(404).json({ message: "Workspace not found" });
+            }
+        }
+
+        if (workspace.ownerId !== userId) {
+            return res.status(403).json({ message: "Only the workspace creator can delete it" });
+        }
+
+        try {
+            await deleteClerkOrganization(workspaceId);
+        } catch (error) {
+            // If Clerk already removed it, clean up the stale Neon row as well.
+            if (error?.status !== 404 && error?.statusCode !== 404) throw error;
+        }
+        await prisma.workspace.deleteMany({ where: { id: workspaceId } });
+
+        return res.json({ message: "Workspace deleted successfully" });
+    } catch (error) {
+        return handleError(error, res, "Failed to delete workspace");
+    }
+};
 
 // Add member to workspace
 export const addMemberToWorkspace = async (req, res) => {
@@ -86,10 +128,21 @@ export const addMemberToWorkspace = async (req, res) => {
             }
         });
 
+        // Send invitation email via Inngest
+        await inngest.send({
+            name: "app/workspace.invitation",
+            data: {
+                inviteeEmail: invitee.email,
+                inviteeName: invitee.name,
+                workspaceName: workspace.name,
+                inviterName: actor.name,
+                origin: req.get('origin')
+            }
+        });
+
         res.json({member, message: "Member added to workspace"});
-        
+
     } catch (error) {
-        console.log(error);
-        res.status(500).json({message: error.code || error.message });
+        handleError(error, res, "Failed to add member to workspace");
     }
 }

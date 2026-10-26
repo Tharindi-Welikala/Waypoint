@@ -4,6 +4,12 @@ import prisma from "../configs/prisma.js";
 import sendEmail from "../configs/nodemailer.js";
 import { syncOrganization, upsertClerkUser } from "../services/clerkSync.js";
 
+// Log email configuration
+console.log('Email configuration:', {
+    smtpUser: process.env.SMTP_USER ? 'configured' : 'missing',
+    senderEmail: process.env.SENDER_EMAIL ? 'configured' : 'missing'
+});
+
 // Create Inngest client
 export const inngest = new Inngest({ id: "waypoint" });
 
@@ -183,8 +189,10 @@ const sendTaskAssignmentEmail = inngest.createFunction(
     // Stop if the task no longer exists
     if (!task) return;
 
-    // Send task assignment email
-    await step.run("send-task-assignment-email", async () => {
+    // Send an assignment email for legacy events only. New task requests send
+    // this directly and set skipAssignmentEmail to avoid duplicate messages.
+    if (!event.data.skipAssignmentEmail) {
+      await step.run("send-task-assignment-email", async () => {
       await sendEmail({
         to: task.assignee.email,
         subject: `New Task Assignment in ${task.project.name}`,
@@ -222,7 +230,8 @@ const sendTaskAssignmentEmail = inngest.createFunction(
           </div>
         `,
       });
-    });
+      });
+    }
 
     // Schedule a reminder if the due date is not today
     if (
@@ -296,6 +305,70 @@ const sendTaskAssignmentEmail = inngest.createFunction(
   }
 );
 
+const sendProjectMembershipEmail = inngest.createFunction(
+  {
+    id: "send-project-membership-email",
+    triggers: [{ event: "app/project.memberAdded" }],
+  },
+  async ({ event }) => {
+    const { email, memberName, projectName, origin } = event.data;
+    await sendEmail({
+      to: email,
+      subject: `You've been added to ${projectName}`,
+      body: `
+        <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+          <h2>Hi ${memberName || "there"},</h2>
+          <p>You have been added to the project <strong>${projectName}</strong>.</p>
+          <a href="${origin}" style="display:inline-block;background:#2563eb;padding:12px 24px;border-radius:6px;color:#fff;text-decoration:none;">Open Waypoint</a>
+        </div>
+      `,
+    });
+  }
+);
+
+// Inngest function to send workspace invitation email
+const sendWorkspaceInvitationEmail = inngest.createFunction(
+  {
+    id: "send-workspace-invitation-mail",
+    triggers: [{ event: "app/workspace.invitation" }],
+  },
+  async ({ event }) => {
+    const { inviteeEmail, inviteeName, workspaceName, inviterName, origin } = event.data;
+
+    try {
+      await sendEmail({
+        to: inviteeEmail,
+        subject: `You've been invited to join ${workspaceName}`,
+        body: `
+          <div style="max-width: 600px; margin: 0 auto; font-family: Arial, sans-serif;">
+            <h2>Hi ${inviteeName},</h2>
+
+            <p style="font-size: 16px;">
+              ${inviterName} has invited you to join the workspace <strong>${workspaceName}</strong>.
+            </p>
+
+            <p style="font-size: 16px; margin: 20px 0;">
+              Log in to your account to accept the invitation and start collaborating with your team.
+            </p>
+
+            <a href="${origin}"
+               style="display: inline-block; background-color: #007bff; padding: 12px 24px; border-radius: 5px; color: #fff; font-weight: 600; font-size: 16px; text-decoration: none;">
+              Go to Workspace
+            </a>
+
+            <p style="margin-top: 20px; font-size: 14px; color: #6c757d;">
+              If you didn't expect this invitation, you can safely ignore this email.
+            </p>
+          </div>
+        `,
+      });
+    } catch (error) {
+      console.error('Failed to send workspace invitation email:', error);
+      throw error;
+    }
+  }
+);
+
 
 
 // Export functions for the Inngest endpoint
@@ -308,5 +381,7 @@ export const functions = [
     syncWorkspaceDeletion,
     syncWorkspaceMemberCreation,
     syncWorkspaceMembershipCreated,
-    sendTaskAssignmentEmail
+    sendTaskAssignmentEmail,
+    sendProjectMembershipEmail,
+    sendWorkspaceInvitationEmail
 ];

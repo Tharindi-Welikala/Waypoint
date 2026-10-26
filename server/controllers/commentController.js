@@ -1,4 +1,5 @@
 import prisma from "../configs/prisma.js";
+import { handleError } from "../utils/errorHandler.js";
 
 
 // Add comment
@@ -11,6 +12,10 @@ export const addComment = async (req, res) => {
         const task = await prisma.task.findUnique({
             where: {id: taskId},
         })
+
+        if(!task){
+            return res.status(404).json({message: "Task not found"});
+        }
 
         const project = await prisma.project.findUnique({
             where: {id: task.projectId},
@@ -35,8 +40,7 @@ export const addComment = async (req, res) => {
         res.json({comment});
         
     }catch (error){
-        console.log(error);
-        res.status(500).json({message: error.code || error.message});
+        handleError(error, res, "An error occurred while processing the request");
     }
 
 }
@@ -52,7 +56,6 @@ export const getTaskComments = async (req, res) =>{
         res.json({comments});
 
     }catch (error){
-        console.log(error);
-        res.status(500).json({message: error.code || error.message});
+        handleError(error, res, "An error occurred while processing the request");
     }
 }
