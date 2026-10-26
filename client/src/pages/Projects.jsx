@@ -1,10 +1,12 @@
 import { useState, useEffect } from "react";
+import { useSearchParams } from "react-router-dom";
 import { useSelector } from "react-redux";
 import { Plus, Search, FolderOpen } from "lucide-react";
 import ProjectCard from "../components/ProjectCard";
 import CreateProjectDialog from "../components/CreateProjectDialog";
 
 export default function Projects() {
+    const [searchParams] = useSearchParams();
     
     const projects = useSelector(
         (state) => state?.workspace?.currentWorkspace?.projects || []
@@ -14,7 +16,7 @@ export default function Projects() {
     const [searchTerm, setSearchTerm] = useState("");
     const [isDialogOpen, setIsDialogOpen] = useState(false);
     const [filters, setFilters] = useState({
-        status: "ALL",
+        status: searchParams.get("status") || "ALL",
         priority: "ALL",
     });
 

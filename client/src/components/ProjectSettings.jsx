@@ -2,8 +2,15 @@ import { format } from "date-fns";
 import { Plus, Save } from "lucide-react";
 import { useEffect, useState } from "react";
 import AddProjectMember from "./AddProjectMember";
+import { useDispatch } from "react-redux";
+import { useAuth } from "@clerk/react";
+import toast from "react-hot-toast";
+import api from "../configs/api";
+import { fetchWorkspaces } from "../features/workspaceSlice";
 
 export default function ProjectSettings({ project }) {
+    const dispatch = useDispatch();
+    const {getToken} = useAuth();
 
     const [formData, setFormData] = useState({
         name: "New Website Launch",
@@ -20,11 +27,34 @@ export default function ProjectSettings({ project }) {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setIsSubmitting(true)
+        toast.loading("Saving...")
+        try{
+            const {data} = await api.put('/projects', {
+                ...formData,
+                id: project.id,
+                workspaceId: project.workspaceId,
+            }, {headers: {Authorization: `Bearer ${await getToken()}`}});
+            setIsDialogOpen(false)
+            dispatch(fetchWorkspaces({getToken}))
+            toast.dismissAll();
+            toast.success(data.message)
+        } catch (error) {
+            toast.dismissAll();
+            toast.error(error?.response?.data?.message || error.message)
+        } finally {
+            setIsSubmitting(false)
+        }
 
     };
 
     useEffect(() => {
-        if (project) setFormData(project);
+        if (!project) return;
+        setFormData({
+            ...project,
+            start_date: project.start_date ? format(new Date(project.start_date), "yyyy-MM-dd") : "",
+            end_date: project.end_date ? format(new Date(project.end_date), "yyyy-MM-dd") : "",
+        });
     }, [project]);
 
     const inputClasses = "w-full px-3 py-2 rounded mt-2 border text-sm dark:bg-zinc-900 border-zinc-300 dark:border-zinc-700 text-zinc-900 dark:text-zinc-300";
@@ -78,11 +108,11 @@ export default function ProjectSettings({ project }) {
                     <div className="space-y-4 grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <label className={labelClasses}>Start Date</label>
-                            <input type="date" value={format(formData.start_date, "yyyy-MM-dd")} onChange={(e) => setFormData({ ...formData, start_date: new Date(e.target.value) })} className={inputClasses} />
+                            <input type="date" value={formData.start_date || ""} onChange={(e) => setFormData({ ...formData, start_date: e.target.value })} className={inputClasses} />
                         </div>
                         <div className="space-y-2">
                             <label className={labelClasses}>End Date</label>
-                            <input type="date" value={format(formData.end_date, "yyyy-MM-dd")} onChange={(e) => setFormData({ ...formData, end_date: new Date(e.target.value) })} className={inputClasses} />
+                            <input type="date" value={formData.end_date || ""} onChange={(e) => setFormData({ ...formData, end_date: e.target.value })} className={inputClasses} />
                         </div>
                     </div>
 

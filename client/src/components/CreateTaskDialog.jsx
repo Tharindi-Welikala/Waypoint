@@ -1,14 +1,21 @@
-import { useState } from "react";
+import { useRef, useState } from "react";
 import { Calendar as CalendarIcon } from "lucide-react";
-import { useSelector } from "react-redux";
+import { useDispatch, useSelector } from "react-redux";
 import { format } from "date-fns";
+import { useAuth } from "@clerk/react";
+import api from "../configs/api";
+import toast from "react-hot-toast";
+import { addTask } from "../features/workspaceSlice";
 
 export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, projectId }) {
+    const {getToken} = useAuth();
+    const dispatch = useDispatch();
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
     const project = currentWorkspace?.projects.find((p) => p.id === projectId);
     const teamMembers = project?.members || [];
 
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const submissionInProgress = useRef(false);
     const [formData, setFormData] = useState({
         title: "",
         description: "",
@@ -21,7 +28,63 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (submissionInProgress.current) return;
+        submissionInProgress.current = true;
+        const existingTaskIds = new Set((project?.tasks || []).map((task) => task.id));
+        setIsSubmitting(true)
+        try {
+            const {data} = await api.post('/tasks', {...formData, workspaceId: currentWorkspace.id, projectId}, {headers: {Authorization: `Bearer ${await getToken()}`}});
+            setShowCreateTask(false)
+            setFormData({
+                title: "",
+                description: "",
+                type: "TASK",
+                status: "TODO",
+                priority: "MEDIUM",
+                assigneeId: "",
+                due_date: "",
+            })
+            if (data.assignmentEmailSent === false) {
+                toast.error("Task created, but the assignment email could not be sent.");
+            } else {
+                toast.success(data.message);
+            }
+            dispatch(addTask(data.task))
+        } catch (error) {
+            // A network error can arrive after the server has committed the task.
+            // Check the project before inviting the user to submit it again.
+            try {
+                const { data } = await api.get(`/projects/${projectId}`);
+                const createdTask = data.project?.tasks?.find((task) =>
+                    !existingTaskIds.has(task.id) &&
+                    task.title === formData.title.trim() &&
+                    task.assigneeId === formData.assigneeId &&
+                    (!formData.due_date || String(task.due_date).slice(0, 10) === formData.due_date)
+                );
 
+                if (createdTask) {
+                    setShowCreateTask(false);
+                    setFormData({
+                        title: "",
+                        description: "",
+                        type: "TASK",
+                        status: "TODO",
+                        priority: "MEDIUM",
+                        assigneeId: "",
+                        due_date: "",
+                    });
+                    dispatch(addTask(createdTask));
+                    toast.success("Task created successfully!");
+                    return;
+                }
+            } catch (recoveryError) {
+                console.error("Could not confirm whether the task was created:", recoveryError);
+            }
+            toast.error(error?.response?.data?.message || error.message);
+        } finally{
+            submissionInProgress.current = false;
+            setIsSubmitting(false)
+        }
 
     };
 
@@ -70,7 +133,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                     <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-1">
                             <label className="text-sm font-medium">Assignee</label>
-                            <select value={formData.assigneeId} onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
+                            <select required value={formData.assigneeId} onChange={(e) => setFormData({ ...formData, assigneeId: e.target.value })} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" >
                                 <option value="">Unassigned</option>
                                 {teamMembers.map((member) => (
                                     <option key={member?.user.id} value={member?.user.id}>
@@ -95,7 +158,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
                         <label className="text-sm font-medium">Due Date</label>
                         <div className="flex items-center gap-2">
                             <CalendarIcon className="size-5 text-zinc-500 dark:text-zinc-400" />
-                            <input type="date" value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} min={new Date().toISOString().split('T')[0]} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" />
+                            <input type="date" required value={formData.due_date} onChange={(e) => setFormData({ ...formData, due_date: e.target.value })} min={new Date().toISOString().split('T')[0]} className="w-full rounded dark:bg-zinc-900 border border-zinc-300 dark:border-zinc-700 px-3 py-2 text-zinc-900 dark:text-zinc-200 text-sm mt-1" />
                         </div>
                         {formData.due_date && (
                             <p className="text-xs text-zinc-500 dark:text-zinc-400">
@@ -106,7 +169,7 @@ export default function CreateTaskDialog({ showCreateTask, setShowCreateTask, pr
 
                     {/* Footer */}
                     <div className="flex justify-end gap-2 pt-2">
-                        <button type="button" onClick={() => setShowCreateTask(false)} className="rounded border border-zinc-300 dark:border-zinc-700 px-5 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 transition" >
+                          <button type="button" disabled={isSubmitting} onClick={() => setShowCreateTask(false)} className="rounded border border-zinc-300 dark:border-zinc-700 px-5 py-2 text-sm hover:bg-zinc-100 dark:hover:bg-zinc-800 transition disabled:opacity-50" >
                             Cancel
                         </button>
                         <button type="submit" disabled={isSubmitting} className="rounded px-5 py-2 text-sm bg-gradient-to-br from-blue-500 to-blue-600 hover:opacity-90 text-white dark:text-zinc-200 transition" >

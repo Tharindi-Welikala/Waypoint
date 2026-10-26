@@ -1,12 +1,13 @@
 import { useState, useEffect } from "react";
 import { useSelector } from "react-redux";
 import { useNavigate, useSearchParams } from "react-router-dom";
-import { ArrowLeftIcon, PlusIcon, SettingsIcon, BarChart3Icon, CalendarIcon, FileStackIcon, ZapIcon } from "lucide-react";
+import { ArrowLeftIcon, PlusIcon, SettingsIcon, BarChart3Icon, CalendarIcon, FileStackIcon, ZapIcon, Loader2Icon } from "lucide-react";
 import ProjectAnalytics from "../components/ProjectAnalytics";
 import ProjectSettings from "../components/ProjectSettings";
 import CreateTaskDialog from "../components/CreateTaskDialog";
 import ProjectCalendar from "../components/ProjectCalendar";
 import ProjectTasks from "../components/ProjectTasks";
+import api from "../configs/api";
 
 export default function ProjectDetail() {
 
@@ -21,18 +22,41 @@ export default function ProjectDetail() {
     const [tasks, setTasks] = useState([]);
     const [showCreateTask, setShowCreateTask] = useState(false);
     const [activeTab, setActiveTab] = useState(tab || "tasks");
+    const [loading, setLoading] = useState(false);
 
     useEffect(() => {
         if (tab) setActiveTab(tab);
     }, [tab]);
 
     useEffect(() => {
+        // First try to find in Redux store
         if (projects && projects.length > 0) {
             const proj = projects.find((p) => p.id === id);
-            setProject(proj);
-            setTasks(proj?.tasks || []);
+            if (proj) {
+                setProject(proj);
+                setTasks(proj?.tasks || []);
+                return;
+            }
+        }
+
+        // If not found in store, fetch from API
+        if (id) {
+            fetchProject();
         }
     }, [id, projects]);
+
+    const fetchProject = async () => {
+        try {
+            setLoading(true);
+            const { data } = await api.get(`/projects/${id}`);
+            setProject(data.project);
+            setTasks(data.project?.tasks || []);
+        } catch (error) {
+            console.error('Failed to fetch project:', error);
+        } finally {
+            setLoading(false);
+        }
+    };
 
     const statusColors = {
         PLANNING: "bg-zinc-200 text-zinc-900 dark:bg-zinc-600 dark:text-zinc-200",
@@ -41,6 +65,15 @@ export default function ProjectDetail() {
         COMPLETED: "bg-blue-200 text-blue-900 dark:bg-blue-500 dark:text-blue-900",
         CANCELLED: "bg-red-200 text-red-900 dark:bg-red-500 dark:text-red-900",
     };
+
+    if (loading) {
+        return (
+            <div className="flex flex-col items-center justify-center h-screen bg-white dark:bg-zinc-950 gap-3">
+                <Loader2Icon className="size-7 text-blue-500 animate-spin" />
+                <p className="text-sm text-gray-500 dark:text-zinc-400">Loading project…</p>
+            </div>
+        );
+    }
 
     if (!project) {
         return (

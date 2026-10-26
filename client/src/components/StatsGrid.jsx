@@ -1,25 +1,31 @@
 import { FolderOpen, CheckCircle, Users, AlertTriangle } from "lucide-react";
-import { useEffect, useState } from "react";
 import { useSelector } from "react-redux";
+import { useUser } from "@clerk/react";
+import { Link } from "react-router-dom";
 
 export default function StatsGrid() {
     const currentWorkspace = useSelector(
         (state) => state?.workspace?.currentWorkspace || null
     );
 
-    const [stats, setStats] = useState({
-        totalProjects: 0,
-        activeProjects: 0,
-        completedProjects: 0,
-        myTasks: 0,
-        overdueIssues: 0,
-    });
+    const { user } = useUser();
+    const projects = currentWorkspace?.projects || [];
+    const tasks = projects.flatMap((project) => project.tasks || []);
+    const stats = {
+        totalProjects: projects.length,
+        completedProjects: projects.filter((project) => project.status === "COMPLETED").length,
+        myTasks: tasks.filter((task) => task.assigneeId === user?.id || task.assignee?.id === user?.id).length,
+        overdueIssues: tasks.filter((task) =>
+            task.status !== "DONE" && task.due_date && new Date(task.due_date) < new Date()
+        ).length,
+    };
 
     const statCards = [
         {
             icon: FolderOpen,
             title: "Total Projects",
             value: stats.totalProjects,
+            href: "/projects",
             subtitle: `projects in ${currentWorkspace?.name}`,
             bgColor: "bg-blue-500/10",
             textColor: "text-blue-500",
@@ -28,6 +34,7 @@ export default function StatsGrid() {
             icon: CheckCircle,
             title: "Completed Projects",
             value: stats.completedProjects,
+            href: "/projects?status=COMPLETED",
             subtitle: `of ${stats.totalProjects} total`,
             bgColor: "bg-emerald-500/10",
             textColor: "text-emerald-500",
@@ -36,6 +43,7 @@ export default function StatsGrid() {
             icon: Users,
             title: "My Tasks",
             value: stats.myTasks,
+            href: "/myTasks",
             subtitle: "assigned to me",
             bgColor: "bg-purple-500/10",
             textColor: "text-purple-500",
@@ -44,44 +52,18 @@ export default function StatsGrid() {
             icon: AlertTriangle,
             title: "Overdue",
             value: stats.overdueIssues,
+            href: "/myTasks?filter=overdue",
             subtitle: "need attention",
             bgColor: "bg-amber-500/10",
             textColor: "text-amber-500",
         },
     ];
 
-    useEffect(() => {
-        if (currentWorkspace) {
-            setStats({
-                totalProjects: currentWorkspace.projects.length,
-                activeProjects: currentWorkspace.projects.filter(
-                    (p) => p.status !== "CANCELLED" && p.status !== "COMPLETED"
-                ).length,
-                completedProjects: currentWorkspace.projects
-                    .filter((p) => p.status === "COMPLETED")
-                    .reduce((acc, project) => acc + project.tasks.length, 0),
-                myTasks: currentWorkspace.projects.reduce(
-                    (acc, project) =>
-                        acc +
-                        project.tasks.filter(
-                            (t) => t.assignee?.email === currentWorkspace.owner.email
-                        ).length,
-                    0
-                ),
-                overdueIssues: currentWorkspace.projects.reduce(
-                    (acc, project) =>
-                        acc + project.tasks.filter((t) => t.due_date < new Date()).length,
-                    0
-                ),
-            });
-        }
-    }, [currentWorkspace]);
-
     return (
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 my-9">
             {statCards.map(
-                ({ icon: Icon, title, value, subtitle, bgColor, textColor }, i) => (
-                    <div key={i} className="bg-white dark:bg-zinc-950 dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-200 dark:border-zinc-800 hover:border-zinc-300 dark:hover:border-zinc-700 transition duration-200 rounded-md" >
+                ({ icon: Icon, title, value, subtitle, bgColor, textColor, href }, i) => (
+                    <Link key={i} to={href} className="block bg-white dark:bg-zinc-950 dark:bg-gradient-to-br dark:from-zinc-800/70 dark:to-zinc-900/50 border border-zinc-200 dark:border-zinc-800 hover:border-blue-400 dark:hover:border-blue-500 hover:shadow-md transition duration-200 rounded-md focus-visible:outline focus-visible:outline-2 focus-visible:outline-blue-500" >
                         <div className="p-6 py-4">
                             <div className="flex items-start justify-between">
                                 <div>
@@ -102,7 +84,7 @@ export default function StatsGrid() {
                                 </div>
                             </div>
                         </div>
-                    </div>
+                    </Link>
                 )
             )}
         </div>

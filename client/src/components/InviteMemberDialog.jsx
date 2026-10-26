@@ -1,10 +1,13 @@
 import { useState } from "react";
 import { Mail, UserPlus } from "lucide-react";
 import { useSelector } from "react-redux";
+import { useClerk } from "@clerk/react";
+import toast from "react-hot-toast";
 
 const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
 
     const currentWorkspace = useSelector((state) => state.workspace?.currentWorkspace || null);
+    const clerk = useClerk();
     const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState({
         email: "",
@@ -13,7 +16,29 @@ const InviteMemberDialog = ({ isDialogOpen, setIsDialogOpen }) => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        if (!currentWorkspace?.id) return;
 
+        setIsSubmitting(true);
+        try {
+            await clerk.setActive({ organization: currentWorkspace.id });
+
+            if (!clerk.organization?.inviteMember) {
+                throw new Error("Active workspace is not ready. Select the workspace and try again.");
+            }
+
+            await clerk.organization.inviteMember({
+                emailAddress: formData.email,
+                role: formData.role,
+            });
+
+            toast.success("Invitation sent");
+            setFormData({ email: "", role: "org:member" });
+            setIsDialogOpen(false);
+        } catch (error) {
+            toast.error(error?.errors?.[0]?.longMessage || error.message || "Failed to send invitation");
+        } finally {
+            setIsSubmitting(false);
+        }
     };
 
     if (!isDialogOpen) return null;
